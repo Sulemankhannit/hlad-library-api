@@ -23,24 +23,26 @@ notion = Client(auth=config.NOTION_TOKEN)
 ai_client = genai.Client(api_key=config.GEMINI_API_KEY)
 
 def get_git_diff() -> str:
-    """Safely extracts the staged changes or the last commit differences."""
+    """Safely extracts the staged changes or the last commit differences with strict UTF-8 rules."""
     try:
-        # We fetch the difference between our current local state and the remote branch
-        # This captures everything we are about to push.
+        # We explicitly pass text=True, encoding="utf-8", and handle translation boundaries smoothly
         result = subprocess.run(
             ["git", "diff", "origin/main...HEAD"], 
             capture_output=True, 
             text=True, 
+            encoding="utf-8",
+            errors="ignore", # Drops unmappable binary anomalies gracefully
             check=True
         )
         
-        # Fallback: if there is no remote tracking branch yet, grab the last commit
         diff_text = result.stdout.strip()
         if not diff_text:
             result = subprocess.run(
                 ["git", "diff", "HEAD~1", "HEAD"], 
                 capture_output=True, 
                 text=True, 
+                encoding="utf-8",
+                errors="ignore",
                 check=True
             )
             diff_text = result.stdout.strip()
@@ -82,40 +84,66 @@ def analyze_code_changes(git_diff: str) -> str:
     return response.text
 
 def push_to_notion(structured_markdown: str):
-    print("🚀 Shipping automated Git-driven audit to Notion Vault...")
+    print("🚀 Shipping concise toggle-based logs to Notion...")
     
-    # Simple block truncation to respect Notion's 2000 character limit per paragraph block
-    truncated_content = structured_markdown if len(structured_markdown) < 2000 else structured_markdown[:1995] + "\n..."
+    # We create three distinct buckets to catch the content
+    sections = {"concepts": [], "built": [], "risks": []}
+    current_bucket = "concepts"
     
-    notion.pages.create(
-        parent={"database_id": config.NOTION_DATABASE_ID},
-        properties={
-            "Name": {
-                "title": [
-                    {
-                        "text": {
-                            "content": "Automated Code Log: HLAD Library Service"
-                        }
-                    }
-                ]
+    # Parse lines into their respective buckets
+    for line in structured_markdown.split("\n"):
+        line = line.strip().replace("**", "").replace("* ", "• ")
+        if not line or "##" in line:
+            if "1. Deep Concepts" in line: current_bucket = "concepts"
+            elif "2. Structural" in line: current_bucket = "built"
+            elif "3. Optimization" in line: current_bucket = "risks"
+            continue
+        
+        sections[current_bucket].append(line)
+
+    # Convert our list of lines into a single string block for each toggle
+    concepts_text = "\n".join(sections["concepts"])[:2000]
+    built_text = "\n".join(sections["built"])[:2000]
+    risks_text = "\n".join(sections["risks"])[:2000]
+
+    # Build the strict interactive Toggle Block JSON structure for Notion
+    toggle_blocks = [
+        {
+            "object": "block",
+            "type": "toggle",
+            "toggle": {
+                "rich_text": [{"type": "text", "text": {"content": "🧩 1. Deep Concepts Unboxed"}}],
+                "children": [{"object": "block", "type": "paragraph", "paragraph": {"rich_text": [{"type": "text", "text": {"content": concepts_text}}]}}]
             }
         },
-        children=[
-            {
-                "object": "block",
-                "type": "paragraph",
-                "paragraph": {
-                    "rich_text": [
-                        {
-                            "type": "text",
-                            "text": {"content": truncated_content}
-                        }
-                    ]
-                }
+        {
+            "object": "block",
+            "type": "toggle",
+            "toggle": {
+                "rich_text": [{"type": "text", "text": {"content": "🛠️ 2. Structural Implementations"}}],
+                "children": [{"object": "block", "type": "paragraph", "paragraph": {"rich_text": [{"type": "text", "text": {"content": built_text}}]}}]
             }
-        ]
-    )
-    print("✅ Entry securely anchored inside your learning database!")
+        },
+        {
+            "object": "block",
+            "type": "toggle",
+            "toggle": {
+                "rich_text": [{"type": "text", "text": {"content": "🐛 3. Optimization Opportunities & Risks"}}],
+                "children": [{"object": "block", "type": "paragraph", "paragraph": {"rich_text": [{"type": "text", "text": {"content": risks_text}}]}}]
+            }
+        }
+    ]
+
+    # Fire the API call
+    try:
+        notion.pages.create(
+            parent={"database_id": config.NOTION_DATABASE_ID},
+            properties={"Name": {"title": [{"text": {"content": "Concise Code Audit Log"}}]}},
+            children=toggle_blocks
+        )
+        print("✅ Clean, interactive toggles anchored in Notion!")
+    except Exception as e:
+        print(f"❌ Notion write failed: {e}")
 
 if __name__ == "__main__":
     print("📦 Gathering local code diffs...")
@@ -124,8 +152,7 @@ if __name__ == "__main__":
     print("🤖 Processing code mechanics via Gemini Core...")
     analysis = analyze_code_changes(diff)
     
-    print("\n--- Visualizing Generated Analysis ---")
-    print(analysis)
-    print("--------------------------------------\n")
+    
     
     push_to_notion(analysis)
+    print("Pushed the log to notion! do check!!")

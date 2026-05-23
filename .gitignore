@@ -5,3 +5,6 @@ __pycache__/
 # Ignore environment variables and secrets
 .env
 venv/
+
+scribe.py
+post_to_x.py
