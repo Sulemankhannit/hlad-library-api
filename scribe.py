@@ -1,10 +1,14 @@
-# scribe.py
 import subprocess
 import sys
+import os
 from google import genai
 from google.genai import types
 from notion_client import Client
 from pydantic_settings import BaseSettings
+from dotenv import load_dotenv
+
+# Explicitly load the local .env configuration file
+load_dotenv()
 
 class ScribeSettings(BaseSettings):
     NOTION_TOKEN: str
@@ -25,18 +29,19 @@ ai_client = genai.Client(api_key=config.GEMINI_API_KEY)
 def get_git_diff() -> str:
     """Safely extracts the staged changes or the last commit differences with strict UTF-8 rules."""
     try:
-        # We explicitly pass text=True, encoding="utf-8", and handle translation boundaries smoothly
+        # Check tracking difference between current HEAD and remote tracking branch
         result = subprocess.run(
             ["git", "diff", "origin/main...HEAD"], 
             capture_output=True, 
             text=True, 
             encoding="utf-8",
-            errors="ignore", # Drops unmappable binary anomalies gracefully
+            errors="ignore", 
             check=True
         )
         
         diff_text = result.stdout.strip()
         if not diff_text:
+            # Fallback to look exclusively at the very last commit payload 
             result = subprocess.run(
                 ["git", "diff", "HEAD~1", "HEAD"], 
                 capture_output=True, 
@@ -57,6 +62,9 @@ def analyze_code_changes(git_diff: str) -> str:
     if git_diff == "No code changes detected.":
         return "### Empty Log\nNo notable backend code alterations detected during this sync window."
 
+    # Print a diagnostic metrics log to check payload scale size
+    print(f"📊 Analyzing code delta payload size: {len(git_diff)} characters.")
+
     system_instruction = (
         "You are an elite Principal Backend Engineer auditing a junior's code delta. "
         "Analyze the incoming raw git diff output and transform it into a world-class "
@@ -73,24 +81,33 @@ def analyze_code_changes(git_diff: str) -> str:
         "unhandled errors, memory leaks, or execution blocks introduced by these changes."
     )
     
-    response = ai_client.models.generate_content(
-        model='gemini-2.5-flash',
-        contents=f"Analyze this code delta:\n\n{git_diff}",
-        config=types.GenerateContentConfig(
-            system_instruction=system_instruction,
-            temperature=0.2, # Highly analytical, cold, deterministic execution mapping
+    try:
+        # FIX: Enforce an explicit HTTP timeout limit to ensure the terminal can NEVER freeze indefinitely
+        response = ai_client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=f"Analyze this code delta:\n\n{git_diff[:5000]}",  # Cap diff at 5000 characters for safety
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                temperature=0.2,
+                # Set underlying HTTP gateway constraints safely
+                http_options={'timeout': 20.0} 
+            )
         )
-    )
-    return response.text
+        return response.text
+    except Exception as e:
+        print(f"❌ Gemini API Network Gateway Timed Out: {e}")
+        return "### Analysis Timeout\nBackend extraction connection dropped during structural network processing."
 
 def push_to_notion(structured_markdown: str):
+    if "Analysis Timeout" in structured_markdown or "Empty Log" in structured_markdown:
+        print("⚠️ Skipping Notion sync due to empty or missing analysis payload.")
+        return
+
     print("🚀 Shipping concise toggle-based logs to Notion...")
     
-    # We create three distinct buckets to catch the content
     sections = {"concepts": [], "built": [], "risks": []}
     current_bucket = "concepts"
     
-    # Parse lines into their respective buckets
     for line in structured_markdown.split("\n"):
         line = line.strip().replace("**", "").replace("* ", "• ")
         if not line or "##" in line:
@@ -101,19 +118,17 @@ def push_to_notion(structured_markdown: str):
         
         sections[current_bucket].append(line)
 
-    # Convert our list of lines into a single string block for each toggle
     concepts_text = "\n".join(sections["concepts"])[:2000]
     built_text = "\n".join(sections["built"])[:2000]
     risks_text = "\n".join(sections["risks"])[:2000]
 
-    # Build the strict interactive Toggle Block JSON structure for Notion
     toggle_blocks = [
         {
             "object": "block",
             "type": "toggle",
             "toggle": {
                 "rich_text": [{"type": "text", "text": {"content": "🧩 1. Deep Concepts Unboxed"}}],
-                "children": [{"object": "block", "type": "paragraph", "paragraph": {"rich_text": [{"type": "text", "text": {"content": concepts_text}}]}}]
+                "children": [{"object": "block", "type": "paragraph", "paragraph": {"rich_text": [{"type": "text", "text": {"content": concepts_text or "No concepts logged."}}]}}]
             }
         },
         {
@@ -121,7 +136,7 @@ def push_to_notion(structured_markdown: str):
             "type": "toggle",
             "toggle": {
                 "rich_text": [{"type": "text", "text": {"content": "🛠️ 2. Structural Implementations"}}],
-                "children": [{"object": "block", "type": "paragraph", "paragraph": {"rich_text": [{"type": "text", "text": {"content": built_text}}]}}]
+                "children": [{"object": "block", "type": "paragraph", "paragraph": {"rich_text": [{"type": "text", "text": {"content": built_text or "No structural updates."}}]}}]
             }
         },
         {
@@ -129,12 +144,11 @@ def push_to_notion(structured_markdown: str):
             "type": "toggle",
             "toggle": {
                 "rich_text": [{"type": "text", "text": {"content": "🐛 3. Optimization Opportunities & Risks"}}],
-                "children": [{"object": "block", "type": "paragraph", "paragraph": {"rich_text": [{"type": "text", "text": {"content": risks_text}}]}}]
+                "children": [{"object": "block", "type": "paragraph", "paragraph": {"rich_text": [{"type": "text", "text": {"content": risks_text or "No vulnerabilities flagged."}}]}}]
             }
         }
     ]
 
-    # Fire the API call
     try:
         notion.pages.create(
             parent={"database_id": config.NOTION_DATABASE_ID},
@@ -152,7 +166,5 @@ if __name__ == "__main__":
     print("🤖 Processing code mechanics via Gemini Core...")
     analysis = analyze_code_changes(diff)
     
-    
-    
     push_to_notion(analysis)
-    print("Pushed the log to notion! do check!!")
+    print("✨ Sync cycle complete!")
