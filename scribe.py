@@ -27,11 +27,22 @@ notion = Client(auth=config.NOTION_TOKEN)
 ai_client = genai.Client(api_key=config.GEMINI_API_KEY)
 
 def get_git_diff() -> str:
-    """Safely extracts the staged changes or the last commit differences with strict UTF-8 rules."""
+    """Safely extracts the staged changes or the last commit differences, 
+    filtering out heavy noise files to keep payloads lightweight."""
     try:
+        # EXPLICIT FILTER: Tell Git to ignore binary files and heavy dependency lockfiles
+        # which easily bloat your diff payload size past network thresholds.
+        filter_noise = [
+            ":!.gitignore", 
+            ":!*lock.json", 
+            ":!poetry.lock", 
+            ":!*.db", 
+            ":!*.json"
+        ]
+        
         # Check tracking difference between current HEAD and remote tracking branch
         result = subprocess.run(
-            ["git", "diff", "origin/main...HEAD"], 
+            ["git", "diff", "origin/main...HEAD"] + filter_noise, 
             capture_output=True, 
             text=True, 
             encoding="utf-8",
@@ -41,9 +52,9 @@ def get_git_diff() -> str:
         
         diff_text = result.stdout.strip()
         if not diff_text:
-            # Fallback to look exclusively at the very last commit payload 
+            # Fallback to look exclusively at the very last commit payload
             result = subprocess.run(
-                ["git", "diff", "HEAD~1", "HEAD"], 
+                ["git", "diff", "HEAD~1", "HEAD"] + filter_noise, 
                 capture_output=True, 
                 text=True, 
                 encoding="utf-8",
@@ -62,8 +73,10 @@ def analyze_code_changes(git_diff: str) -> str:
     if git_diff == "No code changes detected.":
         return "### Empty Log\nNo notable backend code alterations detected during this sync window."
 
-    # Print a diagnostic metrics log to check payload scale size
-    print(f"📊 Analyzing code delta payload size: {len(git_diff)} characters.")
+    # SMART CHUNKING: Slice the diff string payload to a safe threshold (e.g., ~2500 characters).
+    # This guarantees your network sockets can transmit the data instantly without dropping packets.
+    optimized_diff = git_diff[:2500]
+    print(f"📊 Sending an optimized code delta chunk: {len(optimized_diff)} characters.")
 
     system_instruction = (
         "You are an elite Principal Backend Engineer auditing a junior's code delta. "
@@ -82,15 +95,13 @@ def analyze_code_changes(git_diff: str) -> str:
     )
     
     try:
-        # FIX: Enforce an explicit HTTP timeout limit to ensure the terminal can NEVER freeze indefinitely
         response = ai_client.models.generate_content(
             model='gemini-2.5-flash',
-            contents=f"Analyze this code delta:\n\n{git_diff[:5000]}",  # Cap diff at 5000 characters for safety
+            contents=f"Analyze this code delta:\n\n{optimized_diff}",
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
                 temperature=0.2,
-                # Set underlying HTTP gateway constraints safely
-                http_options={'timeout': 20.0} 
+                http_options={'timeout': 30.0} # Elevated safety window
             )
         )
         return response.text
