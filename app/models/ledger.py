@@ -14,7 +14,8 @@ class BorrowLedger(SQLModel,table=True):
     book_id:uuid.UUID=Field(
         foreign_key="book.id",
         nullable=False,
-        index=True
+        index=True,
+        
     )
     borrowed_at:datetime=Field(
         default_factory=lambda:datetime.now(timezone.utc),
