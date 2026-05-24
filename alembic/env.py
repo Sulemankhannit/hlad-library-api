@@ -8,6 +8,7 @@ from alembic import context
 from app.models.user import LibraryUser
 from app.models.book import Book
 from app.models.ledger import BorrowLedger
+from app.models.request import BookRequest
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
