@@ -9,18 +9,16 @@ from app.models.book import Book
 from app.models.user import LibraryUser
 from app.models.ledger import BorrowLedger
 from typing import Annotated
-
+from app.api.dependencies import get_current_user
 router=APIRouter(prefix="/request",tags=["Request Queue"])
 
 @router.post("/",response_model=BookRequestResponse)
 async def book_borrow_request(
     bookdata:BookRequestCreate,
-    session:Annotated[Session,Depends(get_session)]
+    session:Annotated[Session,Depends(get_session)],
+    current_user:Annotated[LibraryUser,Depends(get_current_user)]
 ):
-    # ─── MOCK IDENTITY BOUNDARY ───
-    # In full production, this profile ID is securely parsed out of the incoming JWT bearer credentials.
-    # We choose a distinct 24-character user ID to mock a separate student trying to borrow.
-    mock_borrower_id = "65f2b4c9d0e1f2a3b4c5d6e7"
+    
 
     target_book=session.exec(select(Book).where(Book.id==bookdata.book_id)).first()
 
@@ -36,7 +34,7 @@ async def book_borrow_request(
             detail="This asset copy is currently unavailable. It has already been lended out to another member."
         )
     
-    if target_book.owner_id==mock_borrower_id:
+    if target_book.owner_id==current_user.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="You cannot request to borrow an asset copy that you already own."
@@ -44,7 +42,7 @@ async def book_borrow_request(
     
     existing_active_request=session.exec(
         select(BookRequest).where(
-            BookRequest.receiver_id==mock_borrower_id,
+            BookRequest.receiver_id==current_user.id,
             BookRequest.book_id==bookdata.book_id,
             BookRequest.status==RequestStatus.PENDING
             )
@@ -57,7 +55,7 @@ async def book_borrow_request(
         )
     
     new_book_request=BookRequest(
-        receiver_id=mock_borrower_id,
+        receiver_id=current_user.id,
         book_id=bookdata.book_id,
         status=RequestStatus.PENDING
     )
@@ -73,81 +71,64 @@ async def book_borrow_request(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Critical storage engine transaction error occurred while writing request queue tracking row."
         )
+    
         
         
 
 
-
-
-@router.post("/{request_id}/act", response_model=BookRequestResponse)  
-def handle_custody_of_book(    # important and complex endpoint for deciding who the owner gives the book
-    request_id: int,  
-    owner_input: RequestActionPayload,
-    session: Session = Depends(get_session)
+@router.post("/{request_id}/act",response_model=BookRequestResponse)
+async def handle_custody_of_book(
+    request_id:int,
+    owner_input:RequestActionPayload,
+    session:Annotated[Session,Depends(get_session)],
+    current_user:Annotated[LibraryUser,Depends(get_current_user)]
 ):
-    """
-    Executes the peer-to-peer custody handshake negotiation.
-    Utilizes row-level pessimistic locking (FOR UPDATE) inside an explicit 
-    atomic context manager to completely eliminate double-approval write skew anomalies.
-    """
-    # ─── MOCK IDENTITY BOUNDARY ───
-    # In full production, this is the securely parsed ID of the asset owner extracted from a JWT token.
-    mock_owner_id = "65f1a3b8c9d0e1f2a3b4c5d6"
+    query=select(BookRequest).where(BookRequest.id==request_id).with_for_update()
 
-    # ─── OPEN EXPLICIT CONTEXT TRANSACTION ───
-    with session.begin():
-        
-        # 1. ACQUIRE LOCK: Fetch the request row using a row-level pessimistic lock
-        # This forces any parallel thread trying to act on this same request to wait in line.
-        request_query = (
-            select(BookRequest)
-            .where(BookRequest.id == request_id)
-            .with_for_update()  # Lock
-        )
-        target_request = session.exec(request_query).first() # find the request to be handled
-
-        if not target_request:
-            raise HTTPException(
+    target_request=session.exec(query).first()
+    if not target_request:
+        raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="The target borrow request record could not be found."
             )
-
         # 2.  Ensure the request  hasn't already been handled
-        if target_request.status != RequestStatus.PENDING:
-            raise HTTPException(
+    if target_request.status != RequestStatus.PENDING:
+        raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Transaction aborted. This request has already been finalized with a status of '{target_request.status}'."
             )
+    
+    target_book=session.exec(select(Book).where(Book.id==target_request.book_id)).first()
 
-        # 3. VERIFY IDENTITY
-        target_book = session.exec(select(Book).where(Book.id == target_request.book_id)).first()
-        
-        if not target_book or target_book.is_deleted:
-            raise HTTPException(
+    if not target_book or target_book.is_deleted:
+        raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="The asset copy tied to this transaction does not exist or has been removed from circulation."
             )
 
-        if target_book.owner_id != mock_owner_id:
-            raise HTTPException(
+    if target_book.owner_id != current_user.id:
+        raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access denied. You are not the registered owner of the asset copy tied to this request."
             )
+    
 
         # ───  OWNER'S ACTIONS ───
         
         # OPTION A: THE REJECTION FLOW
-        if owner_input.action == HandshakeAction.REJECT:
-            target_request.status = RequestStatus.REJECTED
+    if owner_input.action == HandshakeAction.REJECT:
+        target_request.status = RequestStatus.REJECTED
+        if(owner_input.owner_notes):  ## added to prevent null overriding
             target_request.owner_notes = owner_input.owner_notes
+         
             
-            session.add(target_request)
-            # Context manager automatically commits here and releases row locks safely
-            return target_request
+        session.add(target_request)
+        session.commit()
+        session.refresh(target_request) 
+        return target_request
 
-        # OPTION B: THE APPROVAL FLOW (THE CRITICAL STATE MUTATION)
-        if owner_input.action == HandshakeAction.APPROVE:
-            
+        # OPTION B: THE APPROVAL FLOW (THE CRITICAL STATE)
+    if owner_input.action == HandshakeAction.APPROVE:
             # Double Check: Ensure the book copy hasn't been lended to someone else via a separate request loop
             if not target_book.is_available:
                 raise HTTPException(
@@ -161,7 +142,9 @@ def handle_custody_of_book(    # important and complex endpoint for deciding who
 
             # B. Finalize the target request tracking row status to APPROVED
             target_request.status = RequestStatus.APPROVED  # for the approved request ,update the request row in db
-            target_request.owner_notes = owner_input.owner_notes
+            if(owner_input.owner_notes):
+                target_request.owner_notes = owner_input.owner_notes
+            
             session.add(target_request)
 
             # C. log the new loan entry, that just happend, in database
@@ -184,6 +167,51 @@ def handle_custody_of_book(    # important and complex endpoint for deciding who
                     owner_notes="System: This book copy has been lended out to another member."
                 )
             )
-
-            # Context manager closes the block, runs the automatic commit, and drops all row locks
+            session.commit()
+            session.refresh(target_request)
+            session.refresh(new_ledger_entry)
+            
             return target_request
+        
+
+
+@router.get("/borrower", response_model=list[BookRequestResponse])
+def get_my_submitted_requests(
+    session: Annotated[Session,Depends(get_session)],
+    current_user:Annotated[LibraryUser,Depends(get_current_user)]
+):
+    """
+    Retrieves all borrow requests submitted by the current logged-in user.
+    Allows borrowers to track if their requests are pending, approved, or rejected.
+    """
+    
+   
+
+    
+    query = select(BookRequest).where(BookRequest.receiver_id == current_user.id)
+    results = session.exec(query).all()
+    return results
+
+
+@router.get("/owner", response_model=list[BookRequestResponse])
+def get_my_incoming_owner_requests(
+    session: Annotated[Session,Depends(get_session)],
+    current_user:Annotated[LibraryUser,Depends(get_current_user)]
+):
+    """
+    Retrieves all incoming pending requests for books owned by the current user.
+    Provides the core data feed for the owner's dashboard evaluation loop.
+    """
+    
+
+    #  Join: Find requests where the linked book's owner matches the logged-in user
+    query = (
+        select(BookRequest)
+        .join(Book, BookRequest.book_id == Book.id)
+        .where(Book.owner_id == current_user.id)
+        # We can sort by oldest first so the owner can address early applicants fairly
+        .order_by(BookRequest.created_at.asc())
+    )
+    
+    results = session.exec(query).all()
+    return results

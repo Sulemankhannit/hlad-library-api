@@ -4,6 +4,8 @@ from app.db.session import get_session
 from app.schemas.book import BookCreate,BookResponse
 from app.models.book import Book
 from typing import Annotated
+from app.api.dependencies import get_current_user
+from app.models.user import LibraryUser
 
 router=APIRouter(prefix="/books",tags=["Books"])
 
@@ -11,10 +13,11 @@ router=APIRouter(prefix="/books",tags=["Books"])
 async def list_books(
     bookdata:BookCreate,
     session:Annotated[Session,Depends(get_session)],
+    current_user:Annotated[LibraryUser,Depends(get_current_user)]
 ):
-    mock_authenticated_user_id = "65f1a3b8c9d0e1f2a3b4c5d6"
+    
 
-    new_book=Book(title=bookdata.title,owner_id=mock_authenticated_user_id,is_available=True)
+    new_book=Book(title=bookdata.title,owner_id=current_user.id,is_available=True)
 
     try:
         session.add(new_book)

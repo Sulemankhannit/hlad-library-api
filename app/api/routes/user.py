@@ -6,28 +6,33 @@ from app.schemas.user import UserCreate,UserResponse
 from app.db.session import get_session
 router=APIRouter(prefix="/user",tags=["User"])
 
-@router.post("/",response_model=UserResponse,status_code=201)
+@router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register_library_user(
-    userdata:UserCreate,
-    session:Annotated[Session,Depends(get_session)]
+    userdata: UserCreate,
+    session: Annotated[Session, Depends(get_session)]
 ):
-    query=select(LibraryUser).where(userdata.id==LibraryUser.id)
-    existing_user=session.exec(query).first()
-    if existing_user:
+   
+    if session.get(LibraryUser, userdata.id):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="user already registered"
+            detail="User already registered."
         )
-    new_user=LibraryUser(id=userdata.id,trust_score=100)
 
+    new_user = LibraryUser(
+        id=userdata.id, 
+        email=userdata.email,
+        trust_score=100
+    )
+
+    
     try:
         session.add(new_user)
         session.commit()
         session.refresh(new_user)
         return new_user
-    except Exception as e:
+    except Exception:
         session.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal Database error"
+            detail="Internal Database Error."
         )
