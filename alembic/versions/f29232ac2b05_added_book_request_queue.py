@@ -25,7 +25,7 @@ def upgrade() -> None:
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('receiver_id', sqlmodel.sql.sqltypes.AutoString(), nullable=False),
     sa.Column('book_id', sa.Uuid(), nullable=False),
-    sa.Column('status', sa.Enum('PENDING', 'APPROVED', 'REJECTED', 'CANCELED', name='requeststatus'), nullable=False),
+    sa.Column('status', sa.Enum('PENDING', 'APPROVED', 'REJECTED', 'CANCELED', 'EXPIRED', 'RETURN_PENDING', 'RETURNED', name='requeststatus'), nullable=False),
     sa.Column('owner_notes', sqlmodel.sql.sqltypes.AutoString(length=255), nullable=True),
     sa.Column('created_at', sa.DateTime(), nullable=False),
     sa.ForeignKeyConstraint(['book_id'], ['book.id'], ),

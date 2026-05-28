@@ -1,7 +1,7 @@
 import uuid
 from sqlmodel import SQLModel,Field
 from datetime import datetime,timezone,timedelta
-
+from app.core.config import settings
 class BorrowLedger(SQLModel,table=True):
     __tablename__:str="borrow_ledger"
     id:int|None=Field(default=None,primary_key=True)
@@ -19,6 +19,10 @@ class BorrowLedger(SQLModel,table=True):
     )
     borrowed_at:datetime=Field(
         default_factory=lambda:datetime.now(timezone.utc),
+        nullable=False
+    )
+    due_date: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc) + timedelta(days=settings.LENDED_DAYS),
         nullable=False
     )
     returned_at:datetime|None=Field(

@@ -1,6 +1,6 @@
 from fastapi import HTTPException,Depends,APIRouter,status
 from sqlmodel import Session,select,update
-
+from datetime import datetime,timezone
 from app.db.session import get_session
 from app.models.request import BookRequest,RequestStatus
 from app.schemas.request import BookRequestCreate,BookRequestResponse
@@ -25,19 +25,19 @@ async def book_borrow_request(
     if not target_book or target_book.is_deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="The requested book asset copy does not exist or has been permanently removed from circulation."
+            detail="The requested book  copy does not exist or has been permanently removed from circulation."
         )
     
     if not target_book.is_available:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="This asset copy is currently unavailable. It has already been lended out to another member."
+            detail="This book copy is currently unavailable. It has already been lended out to another member."
         )
     
     if target_book.owner_id==current_user.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="You cannot request to borrow an asset copy that you already own."
+            detail="You cannot request to borrow an book copy that you already own."
         )
     
     existing_active_request=session.exec(
@@ -51,7 +51,7 @@ async def book_borrow_request(
     if existing_active_request:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="You already have an active pending request lock open for this book copy."
+            detail="You already have an active pending request for this book copy."
         )
     
     new_book_request=BookRequest(
@@ -66,10 +66,10 @@ async def book_borrow_request(
         session.refresh(new_book_request)
         return new_book_request
     except Exception as e:
-        session.rollback
+        session.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Critical storage engine transaction error occurred while writing request queue tracking row."
+            detail="Internal Database error."
         )
     
         
@@ -91,11 +91,11 @@ async def handle_custody_of_book(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="The target borrow request record could not be found."
             )
-        # 2.  Ensure the request  hasn't already been handled
+        #   Ensure the request  hasn't already been handled
     if target_request.status != RequestStatus.PENDING:
         raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Transaction aborted. This request has already been finalized with a status of '{target_request.status}'."
+                detail=f"This request has already been finalized with a status of '{target_request.status}'."
             )
     
     target_book=session.exec(select(Book).where(Book.id==target_request.book_id)).first()
@@ -103,19 +103,19 @@ async def handle_custody_of_book(
     if not target_book or target_book.is_deleted:
         raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="The asset copy tied to this transaction does not exist or has been removed from circulation."
+                detail="The book copy tied to this request does not exist or has been removed from circulation."
             )
 
     if target_book.owner_id != current_user.id:
         raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied. You are not the registered owner of the asset copy tied to this request."
+                detail="Denied You are not the registered owner of the book copy this request."
             )
     
 
-        # ───  OWNER'S ACTIONS ───
+        #  OWNER'S ACTIONS :-
         
-        # OPTION A: THE REJECTION FLOW
+        #  THE REJECTION 
     if owner_input.action == HandshakeAction.REJECT:
         target_request.status = RequestStatus.REJECTED
         if(owner_input.owner_notes):  ## added to prevent null overriding
@@ -127,27 +127,27 @@ async def handle_custody_of_book(
         session.refresh(target_request) 
         return target_request
 
-        # OPTION B: THE APPROVAL FLOW (THE CRITICAL STATE)
+        #  THE APPROVAL [ vulnerable to race conditions and anomalies, handled accrodingly]
     if owner_input.action == HandshakeAction.APPROVE:
-            # Double Check: Ensure the book copy hasn't been lended to someone else via a separate request loop
+            #  Ensure the book copy hasn't been lended to someone else via a separate request loop
             if not target_book.is_available:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="This book copy has already been lended out to another member."
                 )
 
-            # A. Flip the core physical book availability flag to False
+            #  Flip book availability  to False
             target_book.is_available = False
             session.add(target_book)
 
-            # B. Finalize the target request tracking row status to APPROVED
+            
             target_request.status = RequestStatus.APPROVED  # for the approved request ,update the request row in db
             if(owner_input.owner_notes):
                 target_request.owner_notes = owner_input.owner_notes
             
             session.add(target_request)
 
-            # C. log the new loan entry, that just happend, in database
+            #  log the new loan entry, that just happend, in database
             new_ledger_entry = BorrowLedger(
                 user_id=target_request.receiver_id,
                 book_id=target_request.book_id
@@ -155,7 +155,7 @@ async def handle_custody_of_book(
             )
             session.add(new_ledger_entry)
 
-            # D. BULK AUTO-CANCEL COMPETITORS: Clear out all other parallel applicants cleanly
+            #   Clear out all other parallel applicants 
             session.execute(
                 update(BookRequest)
                 .where(BookRequest.book_id == target_book.id)
@@ -204,14 +204,126 @@ def get_my_incoming_owner_requests(
     """
     
 
-    #  Join: Find requests where the linked book's owner matches the logged-in user
+    #  Find requests where the  book's owner matches the logged-in user
     query = (
         select(BookRequest)
         .join(Book, BookRequest.book_id == Book.id)
         .where(Book.owner_id == current_user.id)
-        # We can sort by oldest first so the owner can address early applicants fairly
+        # sort by oldest first so the owner can address early applicants fairly
         .order_by(BookRequest.created_at.asc())
     )
     
     results = session.exec(query).all()
     return results
+
+
+
+@router.post("/{request_id}/return", response_model=BookRequestResponse)
+async def initiate_book_return(
+    request_id: int,
+    session: Annotated[Session, Depends(get_session)],
+    current_user: Annotated[LibraryUser, Depends(get_current_user)]
+):
+    """
+    Borrower Action: Signals to the owner that the book has been physically returned.
+    Transitions the state from APPROVED -> RETURN_PENDING.
+    """
+    
+    #  Fetch the request with a lock
+    query = select(BookRequest).where(BookRequest.id == request_id).with_for_update()
+    target_request = session.exec(query).first()
+    
+    if not target_request:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The target borrow request record could not be found."
+        )
+
+    #  Only the borrower can initiate a return
+    if target_request.receiver_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=" Denied. You are not the borrower for this request."
+        )
+
+    #   can only return a book that is actively borrowed i.e approved
+    if target_request.status != RequestStatus.APPROVED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f" Cannot return a book with status '{target_request.status}'. It must be 'approved'."
+        )
+
+    
+    target_request.status = RequestStatus.RETURN_PENDING
+    session.add(target_request)
+    session.commit()
+    session.refresh(target_request)
+
+    return target_request
+
+
+@router.post("/{request_id}/confirm-return", response_model=BookRequestResponse)
+async def confirm_book_return(
+    request_id: int,
+    session: Annotated[Session, Depends(get_session)],
+    current_user: Annotated[LibraryUser, Depends(get_current_user)]
+):
+    """
+    Owner Action: Confirms the physical book has been returned.
+    Transitions the state from RETURN_PENDING -> RETURNED.
+    Frees up the asset and officially closes the BorrowLedger.
+    """
+    
+    #  Fetch the request with a lock
+    query = select(BookRequest).where(BookRequest.id == request_id).with_for_update()
+    target_request = session.exec(query).first()
+    
+    if not target_request:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The target borrow request record could not be found."
+        )
+
+    # Fetch the Book & Verify Identity
+    target_book = session.exec(select(Book).where(Book.id == target_request.book_id)).first()
+    
+    if target_book.owner_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Denied. Only the registered owner can confirm the return of this asset."
+        )
+
+    
+    if target_request.status != RequestStatus.RETURN_PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"The borrower must initiate the return first. Current status: '{target_request.status}'."
+        )
+
+    # fetch the ledger entry corresponding to the request
+    ledger_query = select(BorrowLedger).where(
+        BorrowLedger.book_id == target_book.id,
+        BorrowLedger.user_id == target_request.receiver_id,
+        BorrowLedger.returned_at == None 
+    )
+    active_ledger = session.exec(ledger_query).first()
+
+   
+    
+    # Update status
+    target_request.status = RequestStatus.RETURNED
+    
+    # Free up the  Book
+    target_book.is_available = True
+    
+    #  Close the  Ledger
+    if active_ledger:
+        active_ledger.returned_at = datetime.now(timezone.utc)
+        session.add(active_ledger)
+
+    session.add(target_request)
+    session.add(target_book)
+    session.commit()
+    session.refresh(target_request)
+
+    return  target_request

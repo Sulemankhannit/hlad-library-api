@@ -8,3 +8,6 @@ venv/
 
 scribe.py
 post_to_x.py
+diff_output.txt
+project_dump.md
+system_designs/

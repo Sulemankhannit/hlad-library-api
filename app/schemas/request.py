@@ -11,14 +11,12 @@ class BookRequestCreate(BaseModel):
 
 
 class BookRequestResponse(BaseModel):
-    """
-    exact output serialized structure returned to the student.
-    """
+    
     id: int
     receiver_id: str
     book_id: uuid.UUID
     status: RequestStatus
     owner_notes: str | None = Field(default=None)
     created_at: datetime
-
+    
     model_config = ConfigDict(from_attributes=True)
