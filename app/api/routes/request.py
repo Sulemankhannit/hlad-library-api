@@ -1,4 +1,4 @@
-from fastapi import HTTPException,Depends,APIRouter,status
+from fastapi import HTTPException,Depends,APIRouter,status,BackgroundTasks
 from sqlmodel import Session,select,update
 from datetime import datetime,timezone
 from app.db.session import get_session
@@ -10,13 +10,15 @@ from app.models.user import LibraryUser
 from app.models.ledger import BorrowLedger
 from typing import Annotated
 from app.api.dependencies import get_current_user
+from app.services.email import send_email
 router=APIRouter(prefix="/request",tags=["Request Queue"])
 
 @router.post("/",response_model=BookRequestResponse)
-async def book_borrow_request(
+def book_borrow_request(
     bookdata:BookRequestCreate,
     session:Annotated[Session,Depends(get_session)],
-    current_user:Annotated[LibraryUser,Depends(get_current_user)]
+    current_user:Annotated[LibraryUser,Depends(get_current_user)],
+    bgtasks:BackgroundTasks
 ):
     
 
@@ -64,6 +66,27 @@ async def book_borrow_request(
         session.add(new_book_request)
         session.commit()
         session.refresh(new_book_request)
+
+        html_message = f"""
+        <html>
+            <body style="font-family: Arial, sans-serif; color: #333;">
+                <h2 style="color: #2ca02c;">New Book Request</h2>
+                <p>Hello,</p>
+                <p>A peer has requested to borrow your copy of <strong>{target_book.title}</strong>.</p>
+                <p>Please log in to your dashboard to <strong>Approve</strong> or <strong>Reject</strong> this Request.</p>
+                <br>
+                <p><em>- HLAD Automated System</em></p>
+            </body>
+        </html>
+        """
+
+        bgtasks.add_task(
+            send_email, 
+            user_id=target_book.owner_id, 
+            subject=f"Action Required: Request for {target_book.title}", 
+            html_content=html_message
+        )
+        
         return new_book_request
     except Exception as e:
         session.rollback()
@@ -76,102 +99,125 @@ async def book_borrow_request(
         
 
 
-@router.post("/{request_id}/act",response_model=BookRequestResponse)
-async def handle_custody_of_book(
-    request_id:int,
-    owner_input:RequestActionPayload,
-    session:Annotated[Session,Depends(get_session)],
-    current_user:Annotated[LibraryUser,Depends(get_current_user)]
+@router.post("/{request_id}/act", response_model=BookRequestResponse)
+def handle_custody_of_book(
+    request_id: int,
+    owner_input: RequestActionPayload,
+    session: Annotated[Session, Depends(get_session)],
+    current_user: Annotated[LibraryUser, Depends(get_current_user)],
+    bgtasks: BackgroundTasks
 ):
-    query=select(BookRequest).where(BookRequest.id==request_id).with_for_update()
+    query = select(BookRequest).where(BookRequest.id == request_id).with_for_update()
 
-    target_request=session.exec(query).first()
+    target_request = session.exec(query).first()
     if not target_request:
         raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="The target borrow request record could not be found."
-            )
-        #   Ensure the request  hasn't already been handled
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The target borrow request record could not be found."
+        )
+        
+    #   Ensure the request hasn't already been handled
     if target_request.status != RequestStatus.PENDING:
         raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"This request has already been finalized with a status of '{target_request.status}'."
-            )
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"This request has already been finalized with a status of '{target_request.status}'."
+        )
     
-    target_book=session.exec(select(Book).where(Book.id==target_request.book_id)).first()
+    target_book = session.exec(select(Book).where(Book.id == target_request.book_id)).first()
 
     if not target_book or target_book.is_deleted:
         raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="The book copy tied to this request does not exist or has been removed from circulation."
-            )
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The book copy tied to this request does not exist or has been removed from circulation."
+        )
 
     if target_book.owner_id != current_user.id:
         raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Denied You are not the registered owner of the book copy this request."
-            )
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Denied. You are not the registered owner of the book copy in this request."
+        )
     
-
-        #  OWNER'S ACTIONS :-
-        
-        #  THE REJECTION 
+    #  OWNER'S ACTIONS :-
+    
+    #  REJECTION 
     if owner_input.action == HandshakeAction.REJECT:
         target_request.status = RequestStatus.REJECTED
-        if(owner_input.owner_notes):  ## added to prevent null overriding
+        if owner_input.owner_notes:  ## added to prevent null overriding
             target_request.owner_notes = owner_input.owner_notes
          
-            
         session.add(target_request)
         session.commit()
         session.refresh(target_request) 
-        return target_request
 
-        #  THE APPROVAL [ vulnerable to race conditions and anomalies, handled accrodingly]
-    if owner_input.action == HandshakeAction.APPROVE:
-            #  Ensure the book copy hasn't been lended to someone else via a separate request loop
-            if not target_book.is_available:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="This book copy has already been lended out to another member."
-                )
-
-            #  Flip book availability  to False
-            target_book.is_available = False
-            session.add(target_book)
-
-            
-            target_request.status = RequestStatus.APPROVED  # for the approved request ,update the request row in db
-            if(owner_input.owner_notes):
-                target_request.owner_notes = owner_input.owner_notes
-            
-            session.add(target_request)
-
-            #  log the new loan entry, that just happend, in database
-            new_ledger_entry = BorrowLedger(
-                user_id=target_request.receiver_id,
-                book_id=target_request.book_id
-                # borrowed_at automatically falls back to current UTC via default_factory
+    #  APPROVAL 
+    elif owner_input.action == HandshakeAction.APPROVE:
+        #  Ensure the book copy hasn't been lended to someone else via a separate request loop
+        if not target_book.is_available:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="This book copy has already been lended out to another member."
             )
-            session.add(new_ledger_entry)
 
-            #   Clear out all other parallel applicants 
-            session.execute(
-                update(BookRequest)
-                .where(BookRequest.book_id == target_book.id)
-                .where(BookRequest.status == RequestStatus.PENDING)
-                # Filter out the request we just approved so we don't overwrite its status
-                .where(BookRequest.id != target_request.id)
-                .values(
-                    status=RequestStatus.REJECTED,
-                    owner_notes="System: This book copy has been lended out to another member."
-                )
+        #  Flip book availability to False
+        target_book.is_available = False
+        session.add(target_book)
+        
+        target_request.status = RequestStatus.APPROVED  # for the approved request, update the request row in db
+        if owner_input.owner_notes:
+            target_request.owner_notes = owner_input.owner_notes
+        
+        session.add(target_request)
+
+        #  log the new loan entry, that just happend, in database
+        new_ledger_entry = BorrowLedger(
+            user_id=target_request.receiver_id,
+            book_id=target_request.book_id
+            # borrowed_at automatically falls back to current UTC via default_factory
+        )
+        session.add(new_ledger_entry)
+
+        #   Clear out all other parallel applicants 
+        session.execute(
+            update(BookRequest)
+            .where(BookRequest.book_id == target_book.id)
+            .where(BookRequest.status == RequestStatus.PENDING)
+            # Filter out the request we just approved so we don't overwrite its status
+            .where(BookRequest.id != target_request.id)
+            .values(
+                status=RequestStatus.REJECTED,
+                owner_notes="System: This book copy has been lended out to another member."
             )
-            session.commit()
-            session.refresh(target_request)
-            session.refresh(new_ledger_entry)
-            
-            return target_request
+        )
+        session.commit()
+        session.refresh(target_request)
+        session.refresh(new_ledger_entry)
+        
+    
+    action_text = "APPROVED" if owner_input.action == HandshakeAction.APPROVE else "REJECTED"
+    color = "#2ca02c" if owner_input.action == HandshakeAction.APPROVE else "#d62728"
+    
+    # create message:-
+    html_message = f"""   
+    <html>
+        <body style="font-family: Arial, sans-serif; color: #333;">
+            <h2 style="color: {color};">Request {action_text}</h2>
+            <p>Hello,</p>
+            <p>The owner has <strong>{action_text}</strong> your request to borrow <strong>{target_book.title}</strong>.</p>
+            <p>Owner Notes: <em>{owner_input.owner_notes or 'No notes provided.'}</em></p>
+            <br>
+            <p><em>- HLAD Automated System</em></p>
+        </body>
+    </html>
+    """     
+    
+    bgtasks.add_task(
+        send_email, 
+        user_id=target_request.receiver_id, 
+        subject=f"Update: Your request for {target_book.title}",
+        html_content=html_message
+    )
+
+    return target_request
         
 
 
@@ -219,10 +265,11 @@ def get_my_incoming_owner_requests(
 
 
 @router.post("/{request_id}/return", response_model=BookRequestResponse)
-async def initiate_book_return(
+def initiate_book_return(
     request_id: int,
     session: Annotated[Session, Depends(get_session)],
-    current_user: Annotated[LibraryUser, Depends(get_current_user)]
+    current_user: Annotated[LibraryUser, Depends(get_current_user)],
+    bgtasks:BackgroundTasks
 ):
     """
     Borrower Action: Signals to the owner that the book has been physically returned.
@@ -252,21 +299,51 @@ async def initiate_book_return(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f" Cannot return a book with status '{target_request.status}'. It must be 'approved'."
         )
-
+  
     
     target_request.status = RequestStatus.RETURN_PENDING
+    target_book=session.exec(select(Book).where(target_request.book_id==Book.id)).first()
+
     session.add(target_request)
     session.commit()
     session.refresh(target_request)
+    
+
+
+    html_message = f"""
+    <html>
+        <body style="font-family: Arial, sans-serif; color: #333;">
+            <h2 style="color: #1f77b4;">Return Initiated</h2>
+            <p>Hello,</p>
+            <p>The borrower has indicated they have physically returned your copy of <strong>{target_book.title}</strong>.</p>
+            <p>Please check your physical possession of the book, then log in to your dashboard to <strong>Confirm Return</strong>. This will free up the asset for others.</p>
+            <br>
+            <p><em>- HLAD Automated System</em></p>
+        </body>
+    </html>
+    """
+   
+
+
+
+    bgtasks.add_task(
+        send_email,
+        user_id=target_book.owner_id, 
+        subject=f"Action Required: Return initiated for {target_book.title}",
+        html_content=html_message
+    )
+
+    
 
     return target_request
 
 
 @router.post("/{request_id}/confirm-return", response_model=BookRequestResponse)
-async def confirm_book_return(
+def confirm_book_return(
     request_id: int,
     session: Annotated[Session, Depends(get_session)],
-    current_user: Annotated[LibraryUser, Depends(get_current_user)]
+    current_user: Annotated[LibraryUser, Depends(get_current_user)],
+    bgtasks:BackgroundTasks
 ):
     """
     Owner Action: Confirms the physical book has been returned.
@@ -321,9 +398,33 @@ async def confirm_book_return(
         active_ledger.returned_at = datetime.now(timezone.utc)
         session.add(active_ledger)
 
+    
+
     session.add(target_request)
     session.add(target_book)
     session.commit()
     session.refresh(target_request)
+
+
+    html_message = f"""
+    <html>
+        <body style="font-family: Arial, sans-serif; color: #333;">
+            <h2 style="color: #1f77b4;">Return Confirmed</h2>
+            <p>Hello,</p>
+            <p>The Owner has confirmed they have physically recieved  copy of <strong>{target_book.title}</strong>.</p>
+            <br>
+            <p><em>- HLAD Automated System</em></p>
+        </body>
+    </html>
+    """
+
+
+
+    bgtasks.add_task(
+        send_email,
+        user_id=target_request.receiver_id, 
+        subject=f"Return Confirmed!.Returned succesfully  {target_book.title}",
+        html_content=html_message
+    )
 
     return  target_request
