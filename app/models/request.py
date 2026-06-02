@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from enum import Enum
-from sqlmodel import SQLModel, Field, UniqueConstraint
+from sqlmodel import SQLModel, Field, UniqueConstraint,Index,text
 import uuid
 
 class RequestStatus(str, Enum):
@@ -39,9 +39,21 @@ class BookRequest(SQLModel, table=True):
     )
 
     # constraints  to prevent duplicate active requests and thus prevent anomalies
+    # __table_args__ = (    # previously had used it to protect the db form request spams, but cuased a bottleneck , you cant ever succefully get the same book twice!! dumb!
+    #     UniqueConstraint(
+    #         "receiver_id", "book_id", "status", 
+    #         name="uq_active_user_book_request"
+    #     ),
+    # )
+
+    # We use an Index instead of a UniqueConstraint so we can pass a WHERE clause.
     __table_args__ = (
-        UniqueConstraint(
-            "receiver_id", "book_id", "status", 
-            name="uq_active_user_book_request"
+        Index(
+            "uq_active_user_book_request", 
+            "receiver_id", 
+            "book_id", 
+            unique=True, 
+            #This tells Postgres to ONLY enforce uniqueness on active lifecycles, thus only the final states can be duplicates, but the active ones can never be duplicates
+            postgresql_where=text("status IN ('PENDING', 'APPROVED', 'RETURN_PENDING')")
         ),
     )
