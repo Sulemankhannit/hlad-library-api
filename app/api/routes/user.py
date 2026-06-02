@@ -7,7 +7,7 @@ from app.db.session import get_session
 router=APIRouter(prefix="/user",tags=["User"])
 
 @router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def register_library_user(
+def register_library_user(
     userdata: UserCreate,
     session: Annotated[Session, Depends(get_session)]
 ):

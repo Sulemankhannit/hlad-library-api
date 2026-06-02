@@ -10,7 +10,7 @@ from app.models.user import LibraryUser
 router=APIRouter(prefix="/books",tags=["Books"])
 
 @router.post("/",response_model=BookResponse,status_code=201)
-async def list_books(
+def list_books(
     bookdata:BookCreate,
     session:Annotated[Session,Depends(get_session)],
     current_user:Annotated[LibraryUser,Depends(get_current_user)]
@@ -34,7 +34,7 @@ async def list_books(
 
 
 @router.get("/",response_model=list[BookResponse])
-async def get_books(
+def get_books(
     session:Annotated[Session,Depends(get_session)],
     offset: int = Query(default=0, ge=0, description="The number of assets to skip over."),
     limit: int = Query(default=20, ge=1, le=100, description="The maximum batch slice returned."),
