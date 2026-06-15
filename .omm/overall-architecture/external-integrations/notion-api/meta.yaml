@@ -1,0 +1,9 @@
+created: 2026-06-15T10:22:43.795Z
+updated: 2026-06-15T10:22:43.797Z
+update_count: 1
+last_field: description
+kind: nested-class
+title: notion-api
+children: []
+parentPath:
+  - external-integrations

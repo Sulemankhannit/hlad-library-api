@@ -1,0 +1,9 @@
+created: 2026-06-15T10:21:36.016Z
+updated: 2026-06-15T10:21:36.018Z
+update_count: 1
+last_field: description
+kind: nested-class
+title: book-model
+children: []
+parentPath:
+  - db-models

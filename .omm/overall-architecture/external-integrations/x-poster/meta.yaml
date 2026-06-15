@@ -1,0 +1,9 @@
+created: 2026-06-15T10:22:23.723Z
+updated: 2026-06-15T10:22:23.724Z
+update_count: 1
+last_field: description
+kind: nested-class
+title: x-poster
+children: []
+parentPath:
+  - external-integrations

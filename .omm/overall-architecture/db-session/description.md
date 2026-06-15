@@ -1,0 +1,1 @@
+The database session helper `app/db/session.py` initializes the SQLAlchemy engine using `DATABASE_URL` from the settings. It provides the `get_session` generator function, which is utilized as a FastAPI Dependency (`Depends(get_session)`) to yield a database session per HTTP request and guarantee proper session closure.

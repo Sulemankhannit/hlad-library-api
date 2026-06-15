@@ -1,0 +1,1 @@
+The application contains a `mock_auth` router which performs simulated, unsecure authentication without password hashing or proper session state verification. This is a security risk for production deployment.

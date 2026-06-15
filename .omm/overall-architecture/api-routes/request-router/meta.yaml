@@ -1,0 +1,9 @@
+created: 2026-06-15T10:21:09.624Z
+updated: 2026-06-15T10:21:09.626Z
+update_count: 1
+last_field: description
+kind: nested-class
+title: request-router
+children: []
+parentPath:
+  - api-routes

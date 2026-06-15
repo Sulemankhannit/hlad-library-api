@@ -1,0 +1,1 @@
+Python script (`scribe.py`) that extracts git differentials, generates Principal Backend Engineer code summaries using Gemini 2.5 Flash, and publishes them structured as toggle blocks into a Notion Database workspace.

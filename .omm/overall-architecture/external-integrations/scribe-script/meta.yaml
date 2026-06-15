@@ -1,0 +1,9 @@
+created: 2026-06-15T10:22:17.298Z
+updated: 2026-06-15T10:22:17.300Z
+update_count: 1
+last_field: description
+kind: nested-class
+title: scribe-script
+children: []
+parentPath:
+  - external-integrations

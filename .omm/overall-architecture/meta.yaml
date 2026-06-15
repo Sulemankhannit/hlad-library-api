@@ -1,0 +1,16 @@
+created: 2026-06-15T10:19:43.468Z
+updated: 2026-06-15T10:20:22.356Z
+update_count: 6
+last_field: todo
+git_commit: b2a1be3
+git_branch: main
+children:
+  - api-routes
+  - database
+  - db-models
+  - db-session
+  - entrypoint
+  - external-integrations
+  - gemini-api
+  - notion-api
+  - services

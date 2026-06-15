@@ -1,0 +1,1 @@
+The application entry point `main.py` initializes the FastAPI application using configuration settings loaded from `app.core.config`. It configures standard routing paths by registering various controllers/sub-routers (user, books, request, ledger, mock_auth).

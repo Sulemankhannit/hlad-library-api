@@ -1,0 +1,28 @@
+graph LR
+    entrypoint["Application Entrypoint\nmain.py"]
+    api-routes["API Routing Layer\napp/api/routes/"]
+    db-session["DB Connection & Session\napp/db/session.py"]
+    services["Core Services\napp/services/"]
+    db-models["Database Entity Models\napp/models/"]
+    external-integrations["External Integrations\npost_to_x.py, scribe.py"]
+    database[("PostgreSQL DB\nDatabase Instance")]
+    notion-api["Notion API\nnotion.co"]
+    gemini-api["Gemini API\ngoogle.com"]
+
+    entrypoint -->|"includes routes"| api-routes
+    api-routes -->|"gets DB session"| db-session
+    api-routes -->|"uses models for CRUD"| db-models
+    api-routes -->|"triggers background tasks"| services
+    db-session -->|"connects to"| database
+    db-models -->|"maps tables in"| database
+    external-integrations -->|"queries git / audits code via"| gemini-api
+    external-integrations -->|"pushes audit logs to"| notion-api
+
+    classDef entry fill:#89b4fa,stroke:#89b4fa,color:#1e1e2e
+    classDef store fill:#a6e3a1,stroke:#a6e3a1,color:#1e1e2e
+    classDef external fill:#585b70,stroke:#585b70,color:#cdd6f4
+    class api-routes entry
+    class entrypoint entry
+    class database store
+    class notion-api external
+    class gemini-api external

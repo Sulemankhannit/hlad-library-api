@@ -1,0 +1,17 @@
+graph TD
+    git-logs["Git History\nLocal Repository"]
+    scribe-script["Scribe Audit Sync\nscribe.py"]
+    x-poster["X Posting Automation\npost_to_x.py"]
+    gemini-api["Gemini API\ngoogle.com"]
+    notion-api["Notion API\nnotion.co"]
+
+    git-logs -->|"reads diffs from"| scribe-script
+    git-logs -->|"reads diffs from"| x-poster
+    scribe-script -->|"summarizes via"| gemini-api
+    scribe-script -->|"logs toggles to"| notion-api
+    x-poster -->|"generates tweet via"| gemini-api
+
+    classDef external fill:#585b70,stroke:#585b70,color:#cdd6f4
+    class gemini-api external
+    class notion-api external
+    class git-logs external

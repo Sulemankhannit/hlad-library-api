@@ -1,0 +1,13 @@
+created: 2026-06-15T10:21:57.137Z
+updated: 2026-06-15T10:22:04.767Z
+update_count: 2
+last_field: diagram
+kind: nested-class
+title: external-integrations
+children:
+  - gemini-api
+  - git-logs
+  - notion-api
+  - scribe-script
+  - x-poster
+parentPath: []

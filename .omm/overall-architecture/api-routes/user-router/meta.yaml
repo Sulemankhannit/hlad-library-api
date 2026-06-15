@@ -1,0 +1,9 @@
+created: 2026-06-15T10:21:02.012Z
+updated: 2026-06-15T10:21:02.014Z
+update_count: 1
+last_field: description
+kind: nested-class
+title: user-router
+children: []
+parentPath:
+  - api-routes

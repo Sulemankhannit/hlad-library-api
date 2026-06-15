@@ -1,0 +1,13 @@
+created: 2026-06-15T10:20:50.893Z
+updated: 2026-06-15T10:20:55.270Z
+update_count: 2
+last_field: diagram
+kind: nested-class
+title: api-routes
+children:
+  - books-router
+  - ledger-router
+  - mock-auth-router
+  - request-router
+  - user-router
+parentPath: []

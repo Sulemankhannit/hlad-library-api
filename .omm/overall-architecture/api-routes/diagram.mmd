@@ -1,0 +1,13 @@
+graph TD
+    user-router["User Router\nuser.py"]
+    books-router["Books Router\nbooks.py"]
+    request-router["Request Router\nrequest.py"]
+    ledger-router["Ledger Router\nledger.py"]
+    mock-auth-router["Mock Auth Router\nmock_auth.py"]
+
+    request-router -->|"validates book availability via"| books-router
+    request-router -->|"logs transactions in"| ledger-router
+    request-router -->|"authenticates users via"| mock-auth-router
+    books-router -->|"authenticates users via"| mock-auth-router
+    ledger-router -->|"authenticates users via"| mock-auth-router
+    user-router -->|"authenticates users via"| mock-auth-router

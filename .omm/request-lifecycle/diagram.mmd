@@ -1,0 +1,22 @@
+graph TD
+    client["HTTP Client"]
+    api-router["FastAPI Router\nmain.py / app/api/routes/"]
+    mock-auth["Auth Dependency\napp/api/dependencies.py"]
+    db-dependency["DB Dependency\napp/db/session.py"]
+    route-handler["Route Handler\napp/api/routes/*.py"]
+    db-transaction["DB Transaction\nPostgreSQL DB"]
+    bg-tasks["Background Tasks\napp/services/email.py"]
+
+    client -->|"1. HTTP Method + Path"| api-router
+    api-router -->|"2. Authenticates current user"| mock-auth
+    api-router -->|"3. Resolves DB session"| db-dependency
+    api-router -->|"4. Executes business logic"| route-handler
+    route-handler -->|"5. Commits changes"| db-transaction
+    route-handler -->|"6. Schedules email sending"| bg-tasks
+    route-handler -->|"7. Returns JSON payload"| client
+
+    classDef entry fill:#89b4fa,stroke:#89b4fa,color:#1e1e2e
+    classDef store fill:#a6e3a1,stroke:#a6e3a1,color:#1e1e2e
+    classDef external fill:#585b70,stroke:#585b70,color:#cdd6f4
+    class client entry
+    class db-transaction store

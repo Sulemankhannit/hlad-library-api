@@ -1,0 +1,1 @@
+The overall system architecture of the HLAD Library API. This is a backend web service built with FastAPI and SQLModel/SQLAlchemy to manage a peer-to-peer library books borrowing catalog. It also features automation scripts for code auditing and social sharing.

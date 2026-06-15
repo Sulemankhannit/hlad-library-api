@@ -1,0 +1,17 @@
+graph TD
+    user-creation["1. User Created\nLibraryUser Model"]
+    book-creation["2. Book Added\nBook Model (is_available=True)"]
+    borrow-request["3. Borrow Requested\nBookRequest (status=PENDING)"]
+    borrow-approved["4. Request Approved\nBook (is_available=False)\nBookRequest (status=APPROVED)"]
+    ledger-log-borrow["5. Transaction Logged\nBorrowLedger (action=BORROW)"]
+    return-requested["6. Return Initiated\nBookRequest (status=RETURN_REQUESTED)"]
+    return-completed["7. Return Completed\nBook (is_available=True)\nBookRequest (status=COMPLETED)"]
+    ledger-log-return["8. Transaction Logged\nBorrowLedger (action=RETURN)"]
+
+    user-creation -->|"owns catalog"| book-creation
+    book-creation -->|"requested by borrower"| borrow-request
+    borrow-request -->|"approved by owner"| borrow-approved
+    borrow-approved -->|"triggers log entry"| ledger-log-borrow
+    ledger-log-borrow -->|"borrower initiates return"| return-requested
+    return-requested -->|"owner confirms return"| return-completed
+    return-completed -->|"triggers log entry"| ledger-log-return

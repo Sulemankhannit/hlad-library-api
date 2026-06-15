@@ -1,0 +1,3 @@
+- [ ] Migrate mock authentication router to a secure JWT/OAuth2 implementation with bcrypt password hashing.
+- [ ] Set up production-grade PostgreSQL database rather than relying on local sqlite or mock DB.
+- [ ] Implement robust error handling for API integrations (Notion client and Gemini API requests).

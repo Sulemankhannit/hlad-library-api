@@ -1,0 +1,9 @@
+created: 2026-06-15T10:21:05.854Z
+updated: 2026-06-15T10:21:05.856Z
+update_count: 1
+last_field: description
+kind: nested-class
+title: books-router
+children: []
+parentPath:
+  - api-routes

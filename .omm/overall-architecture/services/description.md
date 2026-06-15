@@ -1,0 +1,1 @@
+The core services folder `app/services/` holds application utilities that aren't tied directly to endpoints. This includes email notification services (`email.py`) which process message sending asynchronously via FastAPI background tasks.

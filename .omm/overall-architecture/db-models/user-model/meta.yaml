@@ -1,0 +1,9 @@
+created: 2026-06-15T10:21:29.403Z
+updated: 2026-06-15T10:21:29.404Z
+update_count: 1
+last_field: description
+kind: nested-class
+title: user-model
+children: []
+parentPath:
+  - db-models
