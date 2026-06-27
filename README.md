@@ -115,29 +115,20 @@ A core feature of the API is maintaining transaction integrity during the book b
 ```mermaid
 stateDiagram-v2
     [*] --> PENDING : User requests to borrow a book
-
-    state PENDING {
-        note right of PENDING: Book is still marked as available.\nOther users can submit requests.
-    }
+    note right of PENDING: Book is still marked as available.\nOther users can submit requests.
 
     PENDING --> REJECTED : Owner rejects request\n(with optional notes)
     PENDING --> APPROVED : Owner approves request
     
-    state APPROVED {
-        note right of APPROVED: Book.is_available is set to False.\nAll other pending requests for this book\nare auto-rejected by the system.
-    }
+    note right of APPROVED: Book.is_available is set to False.\nAll other pending requests for this book\nare auto-rejected by the system.
     
     APPROVED --> RETURN_PENDING : Borrower initiates return
     
-    state RETURN_PENDING {
-        note right of RETURN_PENDING: Borrower physically hands over the book.\nWaiting for Owner to confirm receipt.
-    }
+    note right of RETURN_PENDING: Borrower physically hands over the book.\nWaiting for Owner to confirm receipt.
     
     RETURN_PENDING --> RETURNED : Owner confirms return
     
-    state RETURNED {
-        note right of RETURNED: Book.is_available is set back to True.\nLedger returned_at is updated.\nAsset is open for borrowing again.
-    }
+    note right of RETURNED: Book.is_available is set back to True.\nLedger returned_at is updated.\nAsset is open for borrowing again.
     
     RETURNED --> [*]
     REJECTED --> [*]
@@ -352,3 +343,8 @@ To deploy:
 1. Install the Vercel CLI: `npm i -g vercel`
 2. Run `vercel` in the root directory.
 3. Configure the environment variables in the Vercel Dashboard project settings.
+
+---
+
+🛠️ Built with ❤️ by **Suleman** & the **HLAD Dev Team**, NIT Kurukshetra.
+
