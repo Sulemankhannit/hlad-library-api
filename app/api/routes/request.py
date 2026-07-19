@@ -123,7 +123,7 @@ def handle_custody_of_book(
             detail=f"This request has already been finalized with a status of '{target_request.status}'."
         )
     
-    target_book = session.exec(select(Book).where(Book.id == target_request.book_id)).first()
+    target_book = session.exec(select(Book).where(Book.id == target_request.book_id).with_for_update()).first() # critical lock i missed before, this prevents the physical book to be lended double times, by locking the book across different requests!!.
 
     if not target_book or target_book.is_deleted:
         raise HTTPException(
