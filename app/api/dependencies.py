@@ -21,6 +21,7 @@ def get_current_user(
     
     user_id: str = payload.get("sub")
     email: str = payload.get("email")
+    role: str = payload.get("role")
 
     if not user_id or not email:
         raise HTTPException(
