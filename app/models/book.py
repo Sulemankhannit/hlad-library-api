@@ -12,7 +12,7 @@ class Book(SQLModel,table=True):
     title:str=Field(max_length=255,nullable=False,index=True)
     owner_id:str=Field(foreign_key="library_user.id",nullable=False,index=True)
     is_available:bool=Field(default=True,nullable=False)
-
+    author: str | None = Field(default=None, max_length=255, index=True)
     
     
     # True means the user "deleted" this book copy. It vanishes from search feeds,
