@@ -17,7 +17,13 @@ def list_books(
 ):
     
 
-    new_book=Book(title=bookdata.title,author=bookdata.author,owner_id=current_user.id,is_available=True)
+    new_book=Book(
+        title=bookdata.title,
+        author=bookdata.author,
+        cover_url=bookdata.cover_url,
+        owner_id=current_user.id,
+        is_available=True
+    )
 
     try:
         session.add(new_book)
