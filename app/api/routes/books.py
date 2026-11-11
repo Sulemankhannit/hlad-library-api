@@ -42,3 +42,16 @@ def get_books(
     query=select(Book).where(Book.is_available==True).where(Book.is_deleted==False).offset(offset).limit(limit)
     results=session.exec(query).all()
     return results
+
+@router.get("/all", response_model=list[BookResponse])
+def get_all_books(
+    session: Annotated[Session, Depends(get_session)],
+    offset: int = Query(default=0, ge=0, description="The number of assets to skip over."),
+    limit: int = Query(default=20, ge=1, le=100, description="The maximum batch slice returned."),
+):
+    """
+    Returns all books in the library catalog, regardless of their current availability status.
+    """
+    query = select(Book).where(Book.is_deleted == False).offset(offset).limit(limit)
+    results = session.exec(query).all()
+    return results
