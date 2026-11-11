@@ -20,3 +20,8 @@ class BookResponse(BaseModel):
     cover_url: str | None = None
 
     model_config=ConfigDict(from_attributes=True)
+
+class BookDeleteResponse(BaseModel):
+    message: str
+    book_id: uuid.UUID
+
