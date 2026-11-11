@@ -21,6 +21,9 @@ class BookResponse(BaseModel):
 
     model_config=ConfigDict(from_attributes=True)
 
+class BookCoverUpdate(BaseModel):
+    cover_url: str | None = Field(default=None, max_length=500, description="Cover image URL")
+
 class BookDeleteResponse(BaseModel):
     message: str
     book_id: uuid.UUID

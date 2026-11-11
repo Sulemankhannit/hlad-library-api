@@ -2,7 +2,7 @@ import uuid
 from fastapi import HTTPException,APIRouter,Depends,status,Query
 from sqlmodel import select,Session,func,update
 from app.db.session import get_session
-from app.schemas.book import BookCreate,BookResponse,BookDeleteResponse
+from app.schemas.book import BookCreate,BookResponse,BookDeleteResponse,BookCoverUpdate
 from app.models.book import Book
 from app.models.request import BookRequest,RequestStatus
 from app.models.ledger import BorrowLedger
@@ -64,6 +64,46 @@ def get_all_books(
     query = select(Book).where(Book.is_deleted == False).offset(offset).limit(limit)
     results = session.exec(query).all()
     return results
+
+@router.patch("/{book_id}/cover", response_model=BookResponse, status_code=status.HTTP_200_OK)
+def update_book_cover(
+    book_id: uuid.UUID,
+    payload: BookCoverUpdate,
+    session: Annotated[Session, Depends(get_session)],
+    current_user: Annotated[LibraryUser, Depends(get_current_user)]
+):
+    """
+    Updates the cover image URL for an existing book copy.
+    - Ensures the book exists and is not soft-deleted.
+    - Ensures only the registered owner can update the cover image.
+    - Updates and commits the new cover_url.
+    """
+    target_book = session.exec(select(Book).where(Book.id == book_id)).first()
+
+    if not target_book or target_book.is_deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Book not found"
+        )
+
+    if str(target_book.owner_id) != str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only update covers for books you own"
+        )
+
+    try:
+        target_book.cover_url = payload.cover_url
+        session.add(target_book)
+        session.commit()
+        session.refresh(target_book)
+        return target_book
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal Database Error occurred while updating book cover."
+        )
 
 @router.delete("/{book_id}", response_model=BookDeleteResponse, status_code=status.HTTP_200_OK)
 def delete_book(
