@@ -19,14 +19,14 @@ def get_current_user(
     payload = token_validation(token)
 
     
-    user_id: str = payload.get("sub")
+    user_id: str = payload.get("sub") or payload.get("id")
     email: str = payload.get("email")
     role: str = payload.get("role")
 
-    if not user_id or not email:
+    if not user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token payload is missing the required 'sub' or 'email' ."
+            detail="Token payload is missing the required user identifier ('sub' or 'id')."
         )
 
     # check if curretly the user exists in the specific LIBRARY DATABASE
@@ -35,6 +35,11 @@ def get_current_user(
     
     # just in time creation, when first time getting the jwt from the nextjs backend
     if not user:
+        if not email:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token payload is missing required 'email' for first-time profile creation."
+            )
         print(f"\nNew JWT detected! Auto-creating library profile for: {email}\n")
         user = LibraryUser(
             id=user_id,
@@ -53,4 +58,25 @@ def get_current_user(
         )
 
     return user
+
+
+def get_current_admin_user(
+    token: Annotated[str, Depends(oauth2_scheme)],
+    session: Annotated[Session, Depends(get_session)]
+) -> LibraryUser:
+    """
+    Enforces admin or owner privileges.
+    Extracts the role from the validated JWT token payload.
+    """
+    payload = token_validation(token)
+    role: str = payload.get("role", "")
+
+    if role not in ["admin", "owner"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied. Admin or owner privileges required."
+        )
+
+    return get_current_user(token=token, session=session)
+
 

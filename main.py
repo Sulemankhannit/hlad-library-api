@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from app.core.config import settings
-from app.api.routes import books,user,request,mock_auth,ledger
+from app.api.routes import books,user,request,mock_auth,ledger,admin
 
 app=FastAPI(title=settings.PROJECT_NAME)
 @app.get("/")
@@ -18,4 +18,5 @@ app.include_router(user.router)
 app.include_router(books.router)
 app.include_router(request.router)
 app.include_router(ledger.router)
+app.include_router(admin.router)
 app.include_router(mock_auth.router)

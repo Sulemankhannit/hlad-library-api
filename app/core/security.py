@@ -43,15 +43,15 @@ def token_validation(token:str)->dict:
         )
     
 
-def create_jwt_access_token(subject_id:str,email:str)->str: # generating the mock token, since nextjs backend is not yet ready
+def create_jwt_access_token(subject_id: str, email: str, role: str = "student") -> str: # generating the mock token, since nextjs backend is not yet ready
 
-    expiry_time=datetime.now(timezone.utc)+timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    expiry_time = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
 
-    payload_to_encode={
-        "sub":subject_id,
-        "exp":int(expiry_time.timestamp()),
-        "role":"student",
-        "email":email
+    payload_to_encode = {
+        "sub": subject_id,
+        "exp": int(expiry_time.timestamp()),
+        "role": role,
+        "email": email
     }
 
     encoded_jwt=jwt.encode(
