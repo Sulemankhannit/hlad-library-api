@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
 import uuid
+from app.models.request import RequestStatus
 
 
 class AdminStatsResponse(BaseModel):
@@ -79,3 +80,23 @@ class AdminTrustScoreUpdate(BaseModel):
 class AdminUserStatusUpdate(BaseModel):
     is_active: bool
     reason: str = Field(..., min_length=1, max_length=255)
+
+
+class AdminBookRequestResponse(BaseModel):
+    id: int
+    book_id: uuid.UUID
+    book_title: str
+    requester_id: str
+    requester_email: str
+    owner_id: str
+    owner_email: str
+    status: RequestStatus
+    owner_notes: str | None = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AdminCancelRequestPayload(BaseModel):
+    reason: str = Field(default="Administrative cancellation", min_length=1, max_length=255)
+

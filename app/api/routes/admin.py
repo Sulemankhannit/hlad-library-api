@@ -19,6 +19,8 @@ from app.schemas.admin import (
     AdminUserResponse,
     AdminTrustScoreUpdate,
     AdminUserStatusUpdate,
+    AdminBookRequestResponse,
+    AdminCancelRequestPayload,
 )
 from app.schemas.book import BookDeleteResponse
 from app.services.email import send_email
@@ -420,6 +422,155 @@ def force_return_loan_admin(
         due_date=ledger_entry.due_date,
         returned_at=ledger_entry.returned_at,
         is_overdue=False,
+    )
+
+
+@router.get("/requests", response_model=list[AdminBookRequestResponse])
+def get_admin_requests(
+    session: Annotated[Session, Depends(get_session)],
+    current_admin: Annotated[LibraryUser, Depends(get_current_admin_user)],
+    status_filter: str = Query(default="all", pattern="^(all|pending|approved|rejected|canceled|expired|return_pending|returned)$"),
+    book_id: uuid.UUID | None = Query(default=None),
+    search: str | None = Query(default=None),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
+):
+    """
+    Returns full history of borrow requests across the entire club (all statuses).
+    Filterable by status, book ID, or search terms (title, requester email).
+    """
+    query = (
+        select(BookRequest, Book)
+        .join(Book, BookRequest.book_id == Book.id)
+    )
+
+    if status_filter != "all":
+        query = query.where(BookRequest.status == RequestStatus(status_filter))
+
+    if book_id is not None:
+        query = query.where(BookRequest.book_id == book_id)
+
+    if search and search.strip():
+        term = f"%{search.strip().lower()}%"
+        query = query.where(
+            or_(
+                func.lower(Book.title).like(term),
+                func.lower(BookRequest.owner_notes).like(term)
+            )
+        )
+
+    # Order newest requests first
+    query = query.order_by(BookRequest.created_at.desc())
+
+    records = session.exec(query.offset(offset).limit(limit)).all()
+    if not records:
+        return []
+
+    # Batch resolve user emails for requesters and book owners
+    user_ids = set()
+    for req, book in records:
+        user_ids.add(req.receiver_id)
+        user_ids.add(book.owner_id)
+
+    users_stmt = select(LibraryUser).where(col(LibraryUser.id).in_(list(user_ids)))
+    user_map = {u.id: u.email for u in session.exec(users_stmt).all()}
+
+    results = []
+    for req, book in records:
+        results.append(
+            AdminBookRequestResponse(
+                id=req.id,
+                book_id=book.id,
+                book_title=book.title,
+                requester_id=req.receiver_id,
+                requester_email=user_map.get(req.receiver_id, "Unknown"),
+                owner_id=book.owner_id,
+                owner_email=user_map.get(book.owner_id, "Unknown"),
+                status=req.status,
+                owner_notes=req.owner_notes,
+                created_at=req.created_at,
+            )
+        )
+
+    return results
+
+
+@router.post("/requests/{request_id}/cancel", response_model=AdminBookRequestResponse)
+def cancel_request_admin(
+    request_id: int,
+    payload: AdminCancelRequestPayload,
+    session: Annotated[Session, Depends(get_session)],
+    current_admin: Annotated[LibraryUser, Depends(get_current_admin_user)],
+    bgtasks: BackgroundTasks
+):
+    """
+    Administrative intervention to cancel an active/pending request.
+    """
+    target_request = session.exec(
+        select(BookRequest).where(BookRequest.id == request_id).with_for_update()
+    ).first()
+
+    if not target_request:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Borrow request not found."
+        )
+
+    if target_request.status in [RequestStatus.RETURNED, RequestStatus.CANCELED, RequestStatus.REJECTED]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot cancel a request that is already finalized with status '{target_request.status}'."
+        )
+
+    target_book = session.exec(select(Book).where(Book.id == target_request.book_id)).first()
+
+    # If the request was approved and actively locking the book, free the book if no other active loan
+    if target_request.status == RequestStatus.APPROVED and target_book:
+        target_book.is_available = True
+        session.add(target_book)
+
+    target_request.status = RequestStatus.CANCELED
+    target_request.owner_notes = f"Admin Cancelled: {payload.reason}"
+    session.add(target_request)
+    session.commit()
+    session.refresh(target_request)
+
+    book_title = target_book.title if target_book else "Book"
+    requester = session.get(LibraryUser, target_request.receiver_id)
+    owner = session.get(LibraryUser, target_book.owner_id) if target_book else None
+
+    # Notify requester
+    if requester:
+        html_notice = f"""
+        <html>
+            <body style="font-family: Arial, sans-serif; color: #333;">
+                <h2>Borrow Request Cancelled by Admin</h2>
+                <p>Hello,</p>
+                <p>Your request for <strong>{book_title}</strong> was cancelled by a library administrator.</p>
+                <p><strong>Reason:</strong> {payload.reason}</p>
+                <br>
+                <p><em>- HLAD Library Administration</em></p>
+            </body>
+        </html>
+        """
+        bgtasks.add_task(
+            send_email,
+            user_id=requester.id,
+            subject=f"HLAD Library: Request Cancelled for {book_title}",
+            html_content=html_notice
+        )
+
+    return AdminBookRequestResponse(
+        id=target_request.id,
+        book_id=target_book.id if target_book else target_request.book_id,
+        book_title=book_title,
+        requester_id=target_request.receiver_id,
+        requester_email=requester.email if requester else "Unknown",
+        owner_id=target_book.owner_id if target_book else "Unknown",
+        owner_email=owner.email if owner else "Unknown",
+        status=target_request.status,
+        owner_notes=target_request.owner_notes,
+        created_at=target_request.created_at,
     )
 
 
