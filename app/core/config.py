@@ -3,6 +3,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):  # why not dotenv? cz,settings, prevent runtime crash, and validates the type of envs too.
     PROJECT_NAME: str = "HLAD Library Microservice"
+    ENVIRONMENT: str = "development"  # "development" locally, "production" on Vercel
     DATABASE_URL: str
     JWT_SECRET: str
     JWT_ALGORITHM:str
